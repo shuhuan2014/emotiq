@@ -29,7 +29,7 @@ script:
   - ros -s emotiq-tests
         -e '(or (asdf:test-system :emotiq)
                 (uiop:quit -1))'
-- ros -s prove
+  - ros -s prove
         -e '(or (prove:run :emotiq-prove)
                 (uiop:quit -1))'
   - ros -s cosi-test
