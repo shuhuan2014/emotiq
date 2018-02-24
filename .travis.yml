@@ -23,19 +23,22 @@ install:
   - ros install lisp-unit
 
 script:
-  - ros -s lisp-unit
+  - ros -s emotiq-tests
         -e '(or (lisp-unit:run-tests :all :emotiq-tests)
                 (uiop:quit -1))'
-  - ros -s prove
+  - ros -s emotiq-tests
+        -e '(or (asdf:test-system :emotiq)
+                (uiop:quit -1))'
+- ros -s prove
         -e '(or (prove:run :emotiq-prove)
                 (uiop:quit -1))'
-  - ros -s lisp-unit
+  - ros -s cosi-test
         -e '(or (lisp-unit:run-tests :all :cosi-test)
                 (uiop:quit -1))'                         
   - ros -s prove
         -e '(or (prove:run :cosi-prove)
                 (uiop:quit -1))'
-  - ros -s prove -s cl-coveralls
+  - ros -s prove -s cl-coveralls 
         -e '(or (coveralls:with-coveralls (:exclude (list "t"))
                   (prove:run :emotiq-prove))
                 (uiop:quit -1))'
