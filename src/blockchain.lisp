@@ -138,7 +138,7 @@
                                         ;   outputs (which gives the
                                         ;   unspent units from which
                                         ;   to spend); 0-indexed e.g.,
-                                        ;   ((1 0) (14 3))
+                                        ;   (("ec2..a2" 0) ("ec2..a2" 3))
   transaction-outputs                   ; sequence of 1 or more pairs,
                                         ;   each a sequence of account
                                         ;   and amount; 0-indexed
@@ -466,6 +466,43 @@ have been visited."
 
 
 
+(defun account-addresses= (address-1 address-2)
+  (string-equal address-1 address-2))
+
+(defun get-credits-per-account (account)
+  (let ((credits '()))
+    (do-blockchain (blk)
+      (do-transactions (tx blk)
+        (loop for (tx-output-account amount) in (transaction-outputs tx)
+              as index from 0
+              when (account-addresses= account tx-output-account)
+                do (push (list (transaction-id tx) index amount) credits))))
+    credits))
+
+(defun find-transaction-with-particular-input (input-tx-id input-index)
+  (do-blockchain (blk)
+    (do-transactions (tx blk)
+      (loop for (tx-id index) in (transaction-inputs tx)
+            when (and (tx-ids= tx-id input-tx-id)
+                      (= index input-index))
+              do (return-from find-transaction-with-particular-input 
+                   tx)))))
+
+(defun filter-credit-redemptions (credits)
+  (loop for credit in credits
+        as (tx-id index) = credit
+        unless (find-transaction-with-particular-input tx-id index)
+          collect credit))
+
+(defun get-balance (account)
+  (let* ((credits (get-credits-per-account account))
+         (credits-after-redemptions (filter-credit-redemptions credits)))
+    (loop for (nil nil amount) in credits-after-redemptions
+          sum amount)))
+          
+
+
+
 
 
 ;;;; Demo/Test
@@ -500,6 +537,7 @@ have been visited."
 
 (defparameter *blockchain-test-args-1*
   `(((("b1ee128b0bc45ced9957f84eb3d35c7e1151867b4632ab358bf4df74a8828201" 0))
+     ;; from the coinbase tx that assigned 51000 to *alice-account*, output:
      ((,*bob-account* 40000)
       (,*alice-account* ,(- 51000 40000))))
     ((("c92446c3c37a46773065a9c8a8e8a8af62404b917949ac17842ee10f5941df15" 0)) 
@@ -513,10 +551,10 @@ have been visited."
       (,*bob-account* ,(- 15000 1000))))))
 
 (defparameter *blockchain-test-double-spends*
-  `(((("b1ee128b0bc45ced9957f84eb3d35c7e1151867b4632ab358bf4df74a8828201" 0))
+  `(((("b1ee128b0bc45ced9957f84eb3d35c7e1151867b4632ab358bf4df74a8828201" 0)) ; <= bad
      ((,*bob-account* 40000)
       (,*alice-account* ,(- 51000 40000))))
-    ((("4a4eac4695454733a305a5f12a9819d0aab47d2d92da09134ac7d278022c1bdd" 0))
+    ((("4a4eac4695454733a305a5f12a9819d0aab47d2d92da09134ac7d278022c1bdd" 0)) ; <= bad
      ((,*alice-account* 5000)
       (,*bob-account* ,(- 20000 5000))))))
 
@@ -525,29 +563,31 @@ have been visited."
     ;; Try to spend 15,000 from this transaction's output to *bob-account*
     ;; (sending it to *alice-account*), but this account had only gotten 14,000
     ;; from this transaction:
-    ((("ec25ee7d0c99fc97ba077f7334d8c7b9dcdf1cef0b8ff710c7b9f6184de7ffa2" 1))
+    ((("ec25ee7d0c99fc97ba077f7334d8c7b9dcdf1cef0b8ff710c7b9f6184de7ffa2" 1)) ; <= bad
      ((,*alice-account* 15000)))
-    ;; Now try to spend exactly 14,000 from this transaction's output to
-    ;; *bob-account* (sending it to *alice-account*). This account had gotten
-    ;; exactly 14,000. So this will leave zero.  Note that this would leave zero
-    ;; (0) as a transaction fee (!), but review that issue later!
-    ((("ec25ee7d0c99fc97ba077f7334d8c7b9dcdf1cef0b8ff710c7b9f6184de7ffa2" 1))
+    ;; Now try to spend exactly 14,000 from this transaction's output
+    ;; to *bob-account* (sending it to *alice-account*). This account
+    ;; had gotten exactly 14,000. So this will leave zero.  Note that
+    ;; this would leave zero (0) as a transaction fee (!). This will
+    ;; be allowed (for now).  Maybe zero transaction fees are kind of
+    ;; iffy, but review that issue later!
+    ((("ec25ee7d0c99fc97ba077f7334d8c7b9dcdf1cef0b8ff710c7b9f6184de7ffa2" 1)) ; <= GOOD TRANSACTION HERE
      ((,*alice-account* 14000)))
     ;; Now try spending zero (0) from Bob back to Alice. Should be rejected:
     ;; zero or negative amounts cannot be transferred.
-    ((("af84a1c4da82ac39cba074057790c651773412f827d429678d2a2388f91046ba" 0))
+    ((("af84a1c4da82ac39cba074057790c651773412f827d429678d2a2388f91046ba" 0)) ; <= bad
      ((,*bob-account* 0)))
     ;; Now try spending 1 million from Bob back to Alice. Should be rejected:
     ;; zero or negative amounts cannot be transferred.
-    ((("af84a1c4da82ac39cba074057790c651773412f827d429678d2a2388f91046ba" 0))
+    ((("af84a1c4da82ac39cba074057790c651773412f827d429678d2a2388f91046ba" 0)) ; <= bad
      ((,*bob-account* -10000000)))))
 
 
 (defparameter *blockchain-test-unknown-tx-output*
-  `(((("b1ee128b0bc45ced9957f84eb3d35c7e1151867b4632ab358bf4df74a8828201" 13)) ; index out of range
+  `(((("b1ee128b0bc45ced9957f84eb3d35c7e1151867b4632ab358bf4df74a8828201" 13)) ; <= bad: index out of range
      ((,*bob-account* 40000)
       (,*alice-account* ,(- 51000 40000))))
-    ((("f0ee028f0fc45ced9957f84ef3d35c7e0050867f4632af358ff4df74a8828200" 0)) ; nonexistent tx
+    ((("f0ee028f0fc45ced9957f84ef3d35c7e0050867f4632af358ff4df74a8828200" 0)) ; <= bad: nonexistent tx
      ((,*alice-account* 5000)
       (,*bob-account* ,(- 20000 5000))))))
   
